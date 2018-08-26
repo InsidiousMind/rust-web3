@@ -72,14 +72,15 @@ pub struct StateDiff(BTreeMap<H160, AccountDiff>);
 /// Trace
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct TransactionTrace {
-	/// Trace address
-	trace_address: Vec<Address>,
-	/// Subtraces
-	subtraces: usize,
-	/// Action
-	action: Action,
-	/// Result
-	result: Option<Res>,
+    /// Trace address
+    #[serde(rename = "traceAddress")]
+    trace_address: Vec<Address>,
+    /// Subtraces
+    subtraces: usize,
+    /// Action
+    action: Action,
+    /// Result
+    result: Option<Res>,
 }
 
 macro_rules! de_value {
@@ -217,59 +218,59 @@ impl<'de> Deserialize<'de> for TransactionTrace {
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
 /// A record of a full VM trace for a CALL/CREATE.
 pub struct VMTrace {
-	/// The code to be executed.
-	pub code: Bytes,
-	/// The operations executed.
-	pub ops: Vec<VMOperation>,
+  /// The code to be executed.
+  pub code: Bytes,
+  /// The operations executed.
+  pub ops: Vec<VMOperation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
 /// A record of the execution of a single VM operation.
 pub struct VMOperation {
-	/// The program counter.
-	pub pc: usize,
-	/// The gas cost for this instruction.
-	pub cost: u64,
-	/// Information concerning the execution of the operation.
-	pub ex: Option<VMExecutedOperation>,
-	/// Subordinate trace of the CALL/CREATE if applicable.
-	// #[serde(bound="VMTrace: Deserialize")]
-	pub sub: Option<VMTrace>,
+  /// The program counter.
+  pub pc: usize,
+  /// The gas cost for this instruction.
+  pub cost: u64,
+  /// Information concerning the execution of the operation.
+  pub ex: Option<VMExecutedOperation>,
+  /// Subordinate trace of the CALL/CREATE if applicable.
+  // #[serde(bound="VMTrace: Deserialize")]
+  pub sub: Option<VMTrace>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
 /// A record of an executed VM operation.
 pub struct VMExecutedOperation {
-	/// The total gas used.
-	#[serde(rename="used")]
-	pub used: u64,
-	/// The stack item placed, if any.
-	pub push: Vec<U256>,
-	/// If altered, the memory delta.
-	#[serde(rename="mem")]
-	pub mem: Option<MemoryDiff>,
-	/// The altered storage value, if any.
-	#[serde(rename="store")]
-	pub store: Option<StorageDiff>,
+  /// The total gas used.
+  #[serde(rename="used")]
+  pub used: u64,
+  /// The stack item placed, if any.
+  pub push: Vec<U256>,
+  /// If altered, the memory delta.
+  #[serde(rename="mem")]
+  pub mem: Option<MemoryDiff>,
+  /// The altered storage value, if any.
+  #[serde(rename="store")]
+  pub store: Option<StorageDiff>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
 /// A diff of some chunk of memory.
 pub struct MemoryDiff {
-	/// Offset into memory the change begins.
-	pub off: usize,
-	/// The changed data.
-	pub data: Bytes,
+  /// Offset into memory the change begins.
+  pub off: usize,
+  /// The changed data.
+  pub data: Bytes,
 }
 
 
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
 /// A diff of some storage value.
 pub struct StorageDiff {
-	/// Which key in storage is changed.
-	pub key: U256,
-	/// What the value has been changed to.
-	pub val: U256,
+  /// Which key in storage is changed.
+  pub key: U256,
+  /// What the value has been changed to.
+  pub val: U256,
 }
 
 

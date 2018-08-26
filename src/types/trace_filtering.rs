@@ -1,7 +1,7 @@
 //! Types for the Parity Transaction-Trace Filtering API
 use types::{BlockNumber, H160, H256, U256, Bytes, Address};
 use serde_json::{self, value};
-use serde::de::{self, Deserialize, Deserializer, Visitor, MapAccess};
+use serde::de::{self, Deserialize, Deserializer, Visitor, MapAccess, SeqAccess};
 use std::fmt;
 
 /// Trace filter
@@ -83,21 +83,39 @@ impl TraceFilterBuilder {
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct Trace {
     /// Action
+    #[serde(flatten)]
     pub action: Action,
     /// Result
     pub result: Res,
     /// Trace address
+    #[serde(rename = "traceAddress")]
     pub trace_address: Vec<usize>,
     /// Subtraces
     pub subtraces: usize,
     /// Transaction position
+    #[serde(rename = "transactionPosition")]
     pub transaction_position: Option<usize>,
     /// Transaction hash
+    #[serde(rename = "transactionHash")]
     pub transaction_hash: Option<H256>,
     /// Block Number
+    #[serde(rename = "blockNumber")]
     pub block_number: u64,
     /// Block Hash
+    #[serde(rename = "blockHash")]
     pub block_hash: H256,
+    /// Action Type
+    #[serde(rename = "type")]
+    action_type: ActionType
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionType {
+    Call,
+    Create,
+    Suicide,
+    Reward
 }
 
 macro_rules! de_value {
@@ -109,9 +127,6 @@ macro_rules! de_value {
 // into the result enum, as well as deserializes `Action` based upon `type` field of the JSON.
 impl<'de> Deserialize<'de> for Trace {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
-        #[derive(Debug, Deserialize)]
-        #[serde(rename_all = "lowercase")]
-        enum TxType { Call, Create, Suicide, Reward };
 
         enum Field {
             Action,
@@ -122,7 +137,7 @@ impl<'de> Deserialize<'de> for Trace {
             TransactionHash,
             BlockNumber,
             BlockHash,
-            TxType
+            ActionType
         };
 
         struct TraceVisitor;
@@ -156,7 +171,7 @@ impl<'de> Deserialize<'de> for Trace {
                             "blockHash" => Ok(Field::BlockHash),
                             "error" => Ok(Field::Result),
                             "result" => Ok(Field::Result),
-                            "type" => Ok(Field::TxType),
+                            "type" => Ok(Field::ActionType),
                             _ => Err(de::Error::unknown_field(value, FIELDS))
                         }
                     }
@@ -183,7 +198,7 @@ impl<'de> Deserialize<'de> for Trace {
                 let mut transaction_hash = None;
                 let mut block_number = None;
                 let mut block_hash = None;
-                let mut tx_type = None;
+                let mut action_type = None;
 
                 while let Some(key) = map.next_key()? {
                     match key {
@@ -235,24 +250,24 @@ impl<'de> Deserialize<'de> for Trace {
                             }
                             block_hash = Some(map.next_value()?); // H256
                         },
-                        Field::TxType => {
-                            if tx_type.is_some() {
+                        Field::ActionType => {
+                            if action_type.is_some() {
                                 return Err(de::Error::duplicate_field("type"));
                             }
-                            tx_type = Some(map.next_value()?); // TxType
+                            action_type = Some(map.next_value()?); // ActionType
                         }
                     }
                 }
 
-                // check to make sure TxType + action was deserialized
-                let tx_type = tx_type.ok_or_else(|| de::Error::missing_field("tx_type"))?;
+                // check to make sure ActionType + action was deserialized
+                let action_type = action_type.ok_or_else(|| de::Error::missing_field("action_type"))?;
                 let action = action.ok_or_else(|| de::Error::missing_field("action"))?;
-                // deserialize correct action struct variant type from TxType
-                let action = match tx_type {
-                    TxType::Call    => Action::Call(de_value!(action)?),
-                    TxType::Create  => Action::Create(de_value!(action)?),
-                    TxType::Suicide => Action::Suicide(de_value!(action)?),
-                    TxType::Reward  => Action::Reward(de_value!(action)?),
+                // deserialize correct action struct variant type from ActionType
+                let action = match action_type {
+                    ActionType::Call    => Action::Call(de_value!(action)?),
+                    ActionType::Create  => Action::Create(de_value!(action)?),
+                    ActionType::Suicide => Action::Suicide(de_value!(action)?),
+                    ActionType::Reward  => Action::Reward(de_value!(action)?),
                 };
                 // make sure of the rest of the fields
                 let result               = result.ok_or_else(|| de::Error::missing_field("result"))?;
@@ -262,9 +277,41 @@ impl<'de> Deserialize<'de> for Trace {
                 let transaction_hash     = transaction_hash.ok_or_else(|| de::Error::missing_field("transaction_hash"))?;
                 let block_number         = block_number.ok_or_else(|| de::Error::missing_field("block_number"))?;
                 let block_hash           = block_hash.ok_or_else(|| de::Error::missing_field("block_hash"))?;
-                Ok(Trace {action, result, trace_address, subtraces, transaction_position, transaction_hash, block_number, block_hash } )
+                Ok(Trace {action, result, trace_address, subtraces, transaction_position, transaction_hash, block_number, block_hash, action_type } )
             }
 
+            // some serialization formats serialize into Vec (Messagepack or Bincode)
+            // so it is helpful to be able to deserialize this struct out of a sequence
+            fn visit_seq<V>(self, mut seq: V) -> Result<Self::Value, V::Error>
+            where
+                V: SeqAccess<'de>,
+            {
+                let action: value::Value = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                let block_hash = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+                let block_number = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(2, &self))?;
+                let result = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(3, &self))?;
+                let subtraces = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(4, &self))?;
+                let trace_address = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(5, &self))?;
+                let transaction_hash = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(6, &self))?;
+                let transaction_position = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(7, &self))?;
+                let action_type: ActionType = seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(8, &self))?;
+                let action = match action_type {
+                    ActionType::Call    => Action::Call(de_value!(action)?),
+                    ActionType::Create  => Action::Create(de_value!(action)?),
+                    ActionType::Suicide => Action::Suicide(de_value!(action)?),
+                    ActionType::Reward  => Action::Reward(de_value!(action)?)
+                };
+                Ok(Trace { action, result, trace_address, subtraces, transaction_position, transaction_hash, block_number, block_hash, action_type })
+            }
         }
 
         const FIELDS: &'static [&'static str] = &["action", "result", "error", "traceAddress", "subtraces",
@@ -298,12 +345,16 @@ impl Default for Res {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Action {
     /// Call
+    #[serde(rename = "action")]
     Call(Call),
     /// Create
+    #[serde(rename = "action")]
     Create(Create),
     /// Suicide
+    #[serde(rename = "action")]
     Suicide(Suicide),
     /// Reward
+    #[serde(rename = "action")]
     Reward(Reward),
 }
 
@@ -462,4 +513,3 @@ mod tests {
         let _trace: Trace = serde_json::from_str(EXAMPLE_TRACE).unwrap();
     }
 }
-
