@@ -80,198 +80,31 @@ impl TraceFilterBuilder {
 
 // `LocalizedTrace` in Parity
 /// Trace-Filtering API trace type
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
 pub struct Trace {
     /// Action
     pub action: Action,
     /// Result
     pub result: Res,
     /// Trace address
+    #[serde(rename = "traceAddress")]
     pub trace_address: Vec<usize>,
     /// Subtraces
     pub subtraces: usize,
     /// Transaction position
+    #[serde(rename = "transactionPosition")]
     pub transaction_position: Option<usize>,
     /// Transaction hash
+    #[serde(rename = "transactionHash")]
     pub transaction_hash: Option<H256>,
     /// Block Number
+    #[serde(rename = "blockNumber")]
     pub block_number: u64,
     /// Block Hash
+    #[serde(rename = "blockHash")]
     pub block_hash: H256,
-}
-
-macro_rules! de_value {
-    ($action: ident) => ({
-        serde_json::from_value($action).map_err(|e| de::Error::custom(e.to_string()))
-    })
-}
-// a pretty standard custom deserialize, except it deserializes 'error' and 'result' of JSON
-// into the result enum, as well as deserializes `Action` based upon `type` field of the JSON.
-impl<'de> Deserialize<'de> for Trace {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
-        #[derive(Debug, Deserialize)]
-        #[serde(rename_all = "lowercase")]
-        enum TxType { Call, Create, Suicide, Reward };
-
-        enum Field {
-            Action,
-            Result,
-            TraceAddress,
-            Subtraces,
-            TransactionPosition,
-            TransactionHash,
-            BlockNumber,
-            BlockHash,
-            TxType
-        };
-
-        struct TraceVisitor;
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
-                where
-                    D: Deserializer<'de>,
-            {
-                struct FieldVisitor;
-                // need custom impl, because Result can either be in `result` field or `error` field of JSON
-                impl<'de> Visitor<'de> for FieldVisitor {
-                    type Value = Field;
-
-                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                        formatter.write_str("`action`, `result`, `traceAddress`, `subtraces`, \
-                                            `transactionPosition`, `transactionHash`, \
-                                            `blockNumber`, or `blockHash`")
-                    }
-
-                    fn visit_str<E>(self, value: &str) -> Result<Field, E>
-                        where
-                            E: de::Error,
-                    {
-                        match value {
-                            "action" => Ok(Field::Action),
-                            "traceAddress" => Ok(Field::TraceAddress),
-                            "subtraces" => Ok(Field::Subtraces),
-                            "transactionPosition" => Ok(Field::TransactionPosition),
-                            "transactionHash" => Ok(Field::TransactionHash),
-                            "blockNumber" => Ok(Field::BlockNumber),
-                            "blockHash" => Ok(Field::BlockHash),
-                            "error" => Ok(Field::Result),
-                            "result" => Ok(Field::Result),
-                            "type" => Ok(Field::TxType),
-                            _ => Err(de::Error::unknown_field(value, FIELDS))
-                        }
-                    }
-                }
-                deserializer.deserialize_identifier(FieldVisitor)
-            }
-        }
-
-        impl<'de> Visitor<'de> for TraceVisitor {
-            type Value = Trace;
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("Trace-Filtering Trace struct")
-            }
-
-            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
-                where
-                    M: MapAccess<'de>
-            {
-                let mut action: Option<value::Value> = None;
-                let mut result = None;
-                let mut trace_address = None;
-                let mut subtraces = None;
-                let mut transaction_position = None;
-                let mut transaction_hash = None;
-                let mut block_number = None;
-                let mut block_hash = None;
-                let mut tx_type = None;
-
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Action => {
-                            if action.is_some() {
-                                return Err(de::Error::duplicate_field("action"));
-                            }
-                            action = Some(map.next_value()?); // serde_json `Value`
-                        },
-                        Field::Result => {
-                            if result.is_some() {
-                                return Err(de::Error::duplicate_field("result"));
-                            }
-                            result = Some(map.next_value()?); // Res
-                        },
-                        Field::TraceAddress => {
-                            if trace_address.is_some() {
-                                return Err(de::Error::duplicate_field("trace_address"));
-                            }
-                            trace_address = Some(map.next_value()?); // Vec<usize>
-                        },
-                        Field::Subtraces => {
-                            if subtraces.is_some() {
-                                return Err(de::Error::duplicate_field("subtraces"));
-                            }
-                            subtraces = Some(map.next_value()?); // usize
-                        },
-                        Field::TransactionPosition => {
-                            if transaction_position.is_some() {
-                                return Err(de::Error::duplicate_field("transaction_position"));
-                            }
-                            transaction_position = Some(map.next_value()?); // usize
-                        },
-                        Field::TransactionHash => {
-                            if transaction_hash.is_some() {
-                                return Err(de::Error::duplicate_field("transaction_hash"));
-                            }
-                            transaction_hash = Some(map.next_value()?); // H256
-                        },
-                        Field::BlockNumber => {
-                            if block_number.is_some() {
-                                return Err(de::Error::duplicate_field("block_number"));
-                            }
-                            block_number = Some(map.next_value()?); // u64
-                        },
-                        Field::BlockHash => {
-                            if block_hash.is_some() {
-                                return Err(de::Error::duplicate_field("block_hash"));
-                            }
-                            block_hash = Some(map.next_value()?); // H256
-                        },
-                        Field::TxType => {
-                            if tx_type.is_some() {
-                                return Err(de::Error::duplicate_field("type"));
-                            }
-                            tx_type = Some(map.next_value()?); // TxType
-                        }
-                    }
-                }
-
-                // check to make sure TxType + action was deserialized
-                let tx_type = tx_type.ok_or_else(|| de::Error::missing_field("tx_type"))?;
-                let action = action.ok_or_else(|| de::Error::missing_field("action"))?;
-                // deserialize correct action struct variant type from TxType
-                let action = match tx_type {
-                    TxType::Call    => Action::Call(de_value!(action)?),
-                    TxType::Create  => Action::Create(de_value!(action)?),
-                    TxType::Suicide => Action::Suicide(de_value!(action)?),
-                    TxType::Reward  => Action::Reward(de_value!(action)?),
-                };
-                // make sure of the rest of the fields
-                let result               = result.ok_or_else(|| de::Error::missing_field("result"))?;
-                let trace_address        = trace_address.ok_or_else(|| de::Error::missing_field("trace_address"))?;
-                let subtraces            = subtraces.ok_or_else(|| de::Error::missing_field("subtraces"))?;
-                let transaction_position = transaction_position.ok_or_else(|| de::Error::missing_field("transaction_position"))?;
-                let transaction_hash     = transaction_hash.ok_or_else(|| de::Error::missing_field("transaction_hash"))?;
-                let block_number         = block_number.ok_or_else(|| de::Error::missing_field("block_number"))?;
-                let block_hash           = block_hash.ok_or_else(|| de::Error::missing_field("block_hash"))?;
-                Ok(Trace {action, result, trace_address, subtraces, transaction_position, transaction_hash, block_number, block_hash } )
-            }
-
-        }
-
-        const FIELDS: &'static [&'static str] = &["action", "result", "error", "traceAddress", "subtraces",
-            "transactionPosition", "transactionHash", "blockNumber", "blockHash"];
-
-        deserializer.deserialize_struct("Trace", FIELDS, TraceVisitor)
-    }
+    #[serde(rename = "type")]
+    action_type: ActionType,
 }
 
 /// Response
@@ -296,6 +129,7 @@ impl Default for Res {
 
 /// Action
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(untagged, rename_all="lowercase")]
 pub enum Action {
     /// Call
     Call(Call),
@@ -305,6 +139,15 @@ pub enum Action {
     Suicide(Suicide),
     /// Reward
     Reward(Reward),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(rename_all="lowercase")]
+pub enum ActionType {
+  Call,
+  Create,
+  Suicide,
+  Reward
 }
 
 /// Call Result
